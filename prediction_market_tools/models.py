@@ -13,7 +13,7 @@ from dateutil.parser import isoparse
 from typing import List
 import warnings
 
-"""pip
+"""
 ========================================
 ENUMS
 ========================================
@@ -80,6 +80,18 @@ class PredictionMarketEvent(BaseModel):
             sub_title=data.get("sub_title"),
         )
     
+    @classmethod
+    def from_polymarket_json(cls, data: dict) -> "PredictionMarketEvent":
+        return cls(
+            title=data["title"],
+            ticker=data["ticker"],
+            category=None,
+            strike_date=safe_parse_datetime("endDate", source=data),
+            mutually_exclusive=True,
+            sub_title=data.get("description"),
+        )
+    
+
 class PredictionMarketContract(BaseModel):
     ticker: str
     title: str
@@ -151,8 +163,53 @@ class PredictionMarketContract(BaseModel):
             platform=Platform.KALSHI,
         )
     
-    def attach_order_book(self, orderbook_json: dict):
-        self.order_book = OrderBookData.from_kalshi_json(orderbook_json.get("orderbook", {}))
+    @classmethod
+    def from_polymarket_market_json(cls, market: dict, event: PredictionMarketEvent) -> "PredictionMarketContract":
+        try:
+            best_bid = float(market.get("bestBid", 0)) if market.get("bestBid") else None
+            best_ask = float(market.get("bestAsk", 0)) if market.get("bestAsk") else None
+
+            return cls(
+                ticker=market["conditionId"],
+                title=market["question"],
+                category=None,
+                event=event,
+
+                open_time=safe_parse_datetime("startDate", source=market),
+                close_time=safe_parse_datetime("endDate", source=market),
+                expiration_time=safe_parse_datetime("endDateIso", "endDate", source=market),
+                expected_expiration_time=None,
+
+                yes_bid=best_bid,
+                yes_ask=best_ask,
+                no_bid=None,
+                no_ask=None,
+                last_price=float(market.get("lastTradePrice", 0)),
+
+                open_interest=None,
+                volume=float(market.get("volume", 0)),
+
+                strike_type=None,
+                strike_upper=None,
+                strike_lower=None,
+
+                rules_primary=market.get("description"),
+                rules_secondary=None,
+
+                order_book=None,
+                response_price_units="usd_cent",
+                platform=Platform.POLYMARKET,
+            )
+        except Exception as e:
+            raise ValueError(f"Failed to parse polymarket contract: {e}")
+    
+    def attach_order_book(self, orderbook_json: dict, platform: Platform):
+        if platform == Platform.KALSHI:
+            self.order_book = OrderBookData.from_kalshi_json(orderbook_json.get("orderbook", {}))
+        elif platform == Platform.POLYMARKET:
+            warnings.warn("Polymarket order book not supported yet")
+        else:
+            warnings.warn("Platform order book not supported yet")
 
 
 class PredictionMarketBundle(BaseModel):
@@ -162,11 +219,53 @@ class PredictionMarketBundle(BaseModel):
 
     @classmethod
     def from_kalshi_event_payload(cls, data: dict):
-        event = PredictionMarketEvent.from_kalshi_json(data["event"])
-        contracts = [
-            PredictionMarketContract.from_kalshi_market_json(mkt, event)
-            for mkt in data.get("markets", [])
-        ]
+        try:
+            event = PredictionMarketEvent.from_kalshi_json(data["event"])
+        except Exception as e:
+            print(f"Failed to parse Kalshi event: {e}")
+            return None
+
+        contracts = []
+        for mkt in data.get("markets", []):
+            try:
+                contract = PredictionMarketContract.from_kalshi_market_json(mkt, event)
+                contracts.append(contract)
+            except Exception as e:
+                print(f"Failed to parse market in event {event.ticker}: {e}")
+                continue
+
         return cls(platform=Platform.KALSHI, event=event, contracts=contracts)
     
+    @classmethod
+    def from_polymarket_event_payload(cls, event_data: dict):
+        try:
+            event = PredictionMarketEvent.from_polymarket_json(event_data)
+            contracts = []
 
+            for market in event_data.get("markets", []):
+                try:
+                    contract = PredictionMarketContract.from_polymarket_market_json(market, event)
+                    contracts.append(contract)
+                except Exception as e:
+                    print(f"Failed to parse market in event {event.ticker}: {e}")
+                    continue
+
+            return cls(platform=Platform.POLYMARKET, event=event, contracts=contracts)
+
+        except Exception as e:
+            print(f"Failed to parse polymarket event payload: {e}")
+            return None
+
+
+"""
+=================================================
+Underlying Extensions
+=================================================
+"""
+
+class ContinuousUnderlyingPredictionMarket(PredictionMarketEvent):
+    """"""
+    pass
+
+class BinaryUnderlyingPredictionMarket(PredictionMarketEvent):
+    pass
