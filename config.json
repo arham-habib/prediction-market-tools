@@ -1,6 +1,7 @@
 {
     "kalshi_event_tickers": [
-        "KXBTCMAXY-25"
+        "KXBTCMAXY-25", 
+        "APPLEUS"
     ],
     "polymarket_event_slugs": [
         "champions-league-winner-2025"

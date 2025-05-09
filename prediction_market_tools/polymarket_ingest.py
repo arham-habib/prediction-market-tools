@@ -67,6 +67,10 @@ def main():
     for bundle in bundles:
         print(bundle)
 
+def load_polymarket_orderbook(token_ids: list[str]):
+    """Load the orderbook for a market"""
+    return 
+
 
 if __name__ == "__main__":
     main()

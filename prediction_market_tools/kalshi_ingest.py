@@ -3,6 +3,9 @@ import asyncio
 import json
 from typing import List
 from pathlib import Path
+import time
+import json
+
 
 from prediction_market_tools.models import (
     PredictionMarketEvent,
@@ -24,18 +27,22 @@ async def fetch_event_with_markets(event_ticker: str, client: httpx.AsyncClient)
     resp = await client.get(url, headers=HEADERS)
     resp.raise_for_status()
     data = resp.json()
-    return PredictionMarketBundle.from_kalshi_event_payload({"event": data["event"], "markets": data["event"].get("markets")})
+    return PredictionMarketBundle.from_kalshi_event_payload({
+        "event": data["event"],
+        "markets": data.get("markets") or data["event"].get("markets")
+    })
 
 
-async def fetch_orderbook(ticker: str, client: httpx.AsyncClient, depth: int = 3) -> OrderBookData:
+async def fetch_orderbook(ticker: str, client: httpx.AsyncClient, depth: int = 5) -> OrderBookData:
     url = f"{BASE_URL}/markets/{ticker}/orderbook?depth={depth}"
     resp = await client.get(url, headers=HEADERS)
     resp.raise_for_status()
     data = resp.json()
-    return OrderBookData.from_kalshi_json(data)
+    orderbook = data['orderbook']
+    return OrderBookData.from_kalshi_json(orderbook)
 
 
-async def enrich_with_orderbooks(bundle: PredictionMarketBundle, client: httpx.AsyncClient, depth: int = 3):
+async def enrich_with_orderbooks(bundle: PredictionMarketBundle, client: httpx.AsyncClient, depth: int = 5):
     for contract in bundle.contracts:
         try:
             orderbook = await fetch_orderbook(contract.ticker, client, depth)

@@ -55,9 +55,18 @@ class OrderBookData(BaseModel):
 
     @classmethod
     def from_kalshi_json(cls, data: dict):
+        def parse_side(side):
+            if not isinstance(side, list):
+                return []
+            return sorted(
+                [tuple(map(float, x)) for x in side if isinstance(x, (list, tuple)) and len(x) == 2],
+                key = lambda x: x[0],
+                reverse=True
+            )
+
         return cls(
-            yes=[tuple(map(float, x)) for x in data.get("yes", [])],
-            no=[tuple(map(float, x)) for x in data.get("no", [])],
+            yes=parse_side(data.get("yes")),
+            no=parse_side(data.get("no")),
         )
     
 
