@@ -17,7 +17,7 @@ import warnings
 ========================================
 TODO
 - [ ] Polymarket you need to multiply price by 100, and fix the "no" order book"
-
+- [ ] Make the price be the price to take 100 contracts instead of the price to take 1 contract
 ========================================
 """
 
@@ -56,9 +56,39 @@ def safe_parse_datetime(*keys: str, source: dict) -> Optional[datetime]:
             except Exception:
                 continue
     return None
+
+
 class OrderBookData(BaseModel):
     yes: List[Tuple[float, float]]  # (price, quantity)
     no: List[Tuple[float, float]]
+    yes_avg_price_100: Optional[float] = None  # Average price to take 100 contracts on yes side
+    no_avg_price_100: Optional[float] = None   # Average price to take 100 contracts on no side
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        self.yes_avg_price_100 = self._calculate_avg_price(self.no, 100)
+        self.no_avg_price_100 = self._calculate_avg_price(self.yes, 100)
+
+    def _calculate_avg_price(self, orders: List[Tuple[float, float]], target_qty: float) -> Optional[float]:
+        if not orders:
+            return None
+                        
+        remaining = target_qty
+        weighted_sum = 0
+        
+        # For asks, we need to convert bid prices to ask prices (100 - bid)
+        for price, qty in orders:
+            fill_qty = min(remaining, qty)
+            weighted_sum += (100 - price) * fill_qty  # Convert to ask space
+            remaining -= fill_qty
+            if remaining <= 0:
+                break
+                
+        if remaining > 0:  # Could not fill full target quantity
+            return None
+            
+        return weighted_sum / target_qty
+
 
     @classmethod
     def from_kalshi_json(cls, data: dict):
@@ -81,19 +111,18 @@ class OrderBookData(BaseModel):
         if "error" in data:
             return cls(yes=[], no=[])
 
-        def parse_side(side):
+        def parse_side(side, is_asks=False):
             if not isinstance(side, list):
                 return []
-            return sorted(
-                [(float(x["price"]), float(x["size"])) for x in side],
-                key=lambda x: x[0],
-                reverse=True
-            )
+            prices = [(float(x["price"]) * 100, float(x["size"])) for x in side]  # multiply by 100
+            if is_asks:
+                prices = [(100 - p, s) for p, s in prices]
+            return sorted(prices, key=lambda x: x[0], reverse=True)
 
-        # For Polymarket, bids are "yes" orders and asks are "no" orders
+        # For Polymarket, bids are "yes" orders and asks are "no" orders (1-ask for no)
         return cls(
             yes=parse_side(data.get("bids", [])),
-            no=parse_side(data.get("asks", [])),
+            no=parse_side(data.get("asks", []), is_asks=True),
         )
     
 
@@ -147,6 +176,7 @@ class PredictionMarketContract(BaseModel):
 
     open_interest: Optional[float]
     volume: Optional[float]
+    volume_24h: Optional[float]
 
     strike_type: Optional[str]
     strike_upper: Optional[float]
@@ -188,6 +218,7 @@ class PredictionMarketContract(BaseModel):
 
             open_interest=market.get("open_interest"),
             volume=market.get("volume"),
+            volume_24h=market.get("volume_24h"),
 
             strike_type=market.get("strike_type"),
             strike_upper=market.get("cap_strike") if market.get("strike_type")=="less" else np.inf,
@@ -218,14 +249,15 @@ class PredictionMarketContract(BaseModel):
                 expiration_time=safe_parse_datetime("endDateIso", "endDate", source=market),
                 expected_expiration_time=None,
 
-                yes_bid=best_bid,
-                yes_ask=best_ask,
-                no_bid=None,
-                no_ask=None,
-                last_price=float(market.get("lastTradePrice", 0)),
+                yes_bid=best_bid * 100 if isinstance(best_bid, float) else None,
+                yes_ask=best_ask * 100 if isinstance(best_ask, float) else None,
+                no_bid=(1-best_ask) * 100 if isinstance(best_ask, float) else None,
+                no_ask=(1-best_bid) * 100 if isinstance(best_bid, float) else None,
+                last_price=float(market.get("lastTradePrice", 0)) * 100,
 
                 open_interest=None,
                 volume=float(market.get("volume", 0)),
+                volume_24h=float(market.get("volume24hrClob", 0)),
 
                 strike_type=None,
                 strike_upper=None,

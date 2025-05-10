@@ -88,11 +88,14 @@ def display_page(pathname, n):
     elif pathname.startswith("/market/"):
         ticker = pathname.split("/market/")[1]
         return render_market_page(ticker)
+    elif pathname == '/config':
+        return render_config_page()
     else:
         return html.H3("404 - Page Not Found")
 
 
 def render_landing_page():
+    # Events section
     tiles = []
     for source in ['kalshi', 'polymarket']:
         for bundle in shared_data[source]:
@@ -105,7 +108,69 @@ def render_landing_page():
                     ])
                 ], className="m-2")
             )
-    return dbc.Container([html.H2("All Events", className="mt-4 mb-3"), dbc.Row(tiles, className="g-4")], fluid=True)
+
+    return dbc.Container([
+        html.H2("Dashboard", className="mt-4 mb-4"),
+        dbc.Button("Configuration", href="/config", color="primary", className="mb-4"),
+        html.H2("All Events", className="mb-4"),
+        dbc.Row(tiles, className="g-4"),
+    ], fluid=True)
+
+
+def render_config_page():
+    with open("config.json", "r") as f:
+        config = json.load(f)
+    
+    kalshi_tickers = config.get("kalshi_event_tickers", [])
+    polymarket_slugs = config.get("polymarket_event_slugs", [])
+
+    return dbc.Container([
+        dbc.Button("Back to Dashboard", href="/", color="secondary", className="mb-4"),
+        html.H2("Configuration", className="mb-4"),
+        dbc.Card([
+            dbc.CardBody([
+                html.H5("Kalshi Event Tickers"),
+                dbc.Input(id="new-kalshi-ticker", placeholder="Add new Kalshi ticker...", className="mb-2"),
+                dbc.Button("Add Kalshi Ticker", id="add-kalshi-ticker", color="primary", className="mb-3"),
+                html.Div([
+                    dbc.Badge(
+                        [
+                            ticker,
+                            html.Button(
+                                "✕",
+                                id={"type": "remove-kalshi", "index": ticker},
+                                className="ms-2 btn-close btn-close-white",
+                                style={"padding": "0.25rem", "fontSize": "0.75rem"}
+                            )
+                        ],
+                        className="me-1 mb-1"
+                    ) for ticker in kalshi_tickers
+                ], id="kalshi-tickers-container"),
+                
+                html.H5("Polymarket Event Slugs", className="mt-3"),
+                dbc.Input(id="new-polymarket-slug", placeholder="Add new Polymarket slug...", className="mb-2"),
+                dbc.Button("Add Polymarket Slug", id="add-polymarket-slug", color="primary", className="mb-3"),
+                html.Div([
+                    dbc.Badge(
+                        [
+                            slug,
+                            html.Button(
+                                "✕",
+                                id={"type": "remove-polymarket", "index": slug}, 
+                                className="ms-2 btn-close btn-close-white",
+                                style={"padding": "0.25rem", "fontSize": "0.75rem"}
+                            )
+                        ],
+                        className="me-1 mb-1"
+                    ) for slug in polymarket_slugs
+                ], id="polymarket-slugs-container"),
+                
+                # Add stores for config management
+                dcc.Store(id='config-store'),
+                html.Div(id='config-update-trigger')
+            ])
+        ])
+    ], fluid=True)
 
 
 def render_event_page(ticker):
@@ -114,12 +179,20 @@ def render_event_page(ticker):
             if bundle.event.ticker == ticker:
                 markets = []
                 for contract in bundle.contracts:
+                    yes_ask_display = f"{contract.yes_ask:.2f}" if isinstance(contract.yes_ask, float) else "N/A"
+                    no_ask_display = f"{contract.no_ask:.2f}" if isinstance(contract.no_ask, float) else "N/A"
                     markets.append(
                         dbc.Col(
                             dbc.Card([
                                 dbc.CardBody([
                                     html.H5(contract.title),
                                     html.P(f"Ticker: {contract.ticker}"),
+                                    html.P([
+                                        "Yes Ask: ",
+                                        html.Span(yes_ask_display, style={'color': 'red'} if contract.yes_ask else {}),
+                                        " | No Ask: ",
+                                        html.Span(no_ask_display, style={'color': 'red'} if contract.no_ask else {})
+                                    ]),
                                     dcc.Link("View Market", href=f"/market/{contract.ticker}")
                                 ])
                             ], className="h-100")
@@ -141,17 +214,26 @@ def render_market_page(ticker):
             for contract in bundle.contracts:
                 if contract.ticker == ticker:
                     orderbook_table = render_order_book(contract)
+                    yes_bid_display = f"{contract.yes_bid:.2f}" if isinstance(contract.yes_bid, float) else "N/A"
+                    yes_ask_display = f"{contract.yes_ask:.2f}" if isinstance(contract.yes_ask, float) else "N/A"
+                    no_bid_display = f"{contract.no_bid:.2f}" if isinstance(contract.no_bid, float) else "N/A"
+                    no_ask_display = f"{contract.no_ask:.2f}" if isinstance(contract.no_ask, float) else "N/A"
+                    strike_upper_display = f"{contract.strike_upper:.2f}" if isinstance(contract.strike_upper, float) else "N/A"
+                    strike_lower_display = f"{contract.strike_lower:.2f}" if isinstance(contract.strike_lower, float) else "N/A"
+                    last_price_display = f"{contract.last_price:.2f}" if isinstance(contract.last_price, float) else "N/A"
+                    volume_display = f"{contract.volume:.2f}" if isinstance(contract.volume, float) else "N/A"
+                    
                     details = [
                         html.H4(f"Market: {contract.title}"),
                         html.P(f"Ticker: {contract.ticker}"),
                         html.P(f"Open Time: {contract.open_time}"),
                         html.P(f"Close Time: {contract.close_time}"),
-                        html.P(f"Yes Bid/Ask: {contract.yes_bid} / {contract.yes_ask}"),
-                        html.P(f"No Bid/Ask: {contract.no_bid} / {contract.no_ask}"),
-                        html.P(f"Upper strike: {contract.strike_upper}"),
-                        html.P(f"Lower strike: {contract.strike_lower}"),
-                        html.P(f"Last Price: {contract.last_price}"),
-                        html.P(f"Volume: {contract.volume}"),
+                        html.P(f"Yes Bid/Ask: {yes_bid_display} / {yes_ask_display}"),
+                        html.P(f"No Bid/Ask: {no_bid_display} / {no_ask_display}"),
+                        html.P(f"Upper strike: {strike_upper_display}"),
+                        html.P(f"Lower strike: {strike_lower_display}"),
+                        html.P(f"Last Price: {last_price_display}"),
+                        html.P(f"Volume: {volume_display}"),
                         html.P(f"Rules: {contract.rules_primary}"),
                         html.H5("Order Book"),
                         orderbook_table,
@@ -167,19 +249,33 @@ def render_order_book(contract):
         orderbook_table = dbc.Row([
             dbc.Col([
                 html.H6("Yes Book"),
+                html.P([
+                    "Price for 100 contracts: ",
+                    html.Span(
+                        f"{contract.order_book.yes_avg_price_100:.2f}" if isinstance(contract.order_book.yes_avg_price_100, float) else "N/A",
+                        style={'fontWeight': 'bold'}
+                    )
+                ]),
                 dbc.Table([
                     html.Thead(html.Tr([html.Th("Price"), html.Th("Quantity")])),
                     html.Tbody([
-                        html.Tr([html.Td(f"{price}"), html.Td(f"{qty}")]) for price, qty in contract.order_book.yes
+                        html.Tr([html.Td(f"{price:.2f}"), html.Td(f"{qty:.2f}")]) for price, qty in contract.order_book.yes
                     ])
                 ], bordered=True, striped=True, hover=True)
             ]),
             dbc.Col([
                 html.H6("No Book"),
+                html.P([
+                    "Price for 100 contracts: ",
+                    html.Span(
+                        f"{contract.order_book.no_avg_price_100:.2f}" if isinstance(contract.order_book.no_avg_price_100, float) else "N/A",
+                        style={'fontWeight': 'bold'}
+                    )
+                ]),
                 dbc.Table([
                     html.Thead(html.Tr([html.Th("Price"), html.Th("Quantity")])),
                     html.Tbody([
-                        html.Tr([html.Td(f"{price}"), html.Td(f"{qty}")]) for price, qty in contract.order_book.no
+                        html.Tr([html.Td(f"{price:.2f}"), html.Td(f"{qty:.2f}")]) for price, qty in contract.order_book.no
                     ])
                 ], bordered=True, striped=True, hover=True)
             ])

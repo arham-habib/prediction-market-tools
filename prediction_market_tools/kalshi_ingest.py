@@ -33,7 +33,7 @@ async def fetch_event_with_markets(event_ticker: str, client: httpx.AsyncClient)
     })
 
 
-async def fetch_orderbook(ticker: str, client: httpx.AsyncClient, depth: int = 5) -> OrderBookData:
+async def fetch_orderbook(ticker: str, client: httpx.AsyncClient, depth: int = 10) -> OrderBookData:
     url = f"{BASE_URL}/markets/{ticker}/orderbook?depth={depth}"
     resp = await client.get(url, headers=HEADERS)
     resp.raise_for_status()
