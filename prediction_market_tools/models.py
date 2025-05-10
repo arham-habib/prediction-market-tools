@@ -15,6 +15,14 @@ import warnings
 
 """
 ========================================
+TODO
+- [ ] Polymarket you need to multiply price by 100, and fix the "no" order book"
+
+========================================
+"""
+
+"""
+========================================
 ENUMS
 ========================================
 """
@@ -48,7 +56,6 @@ def safe_parse_datetime(*keys: str, source: dict) -> Optional[datetime]:
             except Exception:
                 continue
     return None
-
 class OrderBookData(BaseModel):
     yes: List[Tuple[float, float]]  # (price, quantity)
     no: List[Tuple[float, float]]
@@ -67,6 +74,26 @@ class OrderBookData(BaseModel):
         return cls(
             yes=parse_side(data.get("yes")),
             no=parse_side(data.get("no")),
+        )
+
+    @classmethod 
+    def from_polymarket_json(cls, data: dict):
+        if "error" in data:
+            return cls(yes=[], no=[])
+
+        def parse_side(side):
+            if not isinstance(side, list):
+                return []
+            return sorted(
+                [(float(x["price"]), float(x["size"])) for x in side],
+                key=lambda x: x[0],
+                reverse=True
+            )
+
+        # For Polymarket, bids are "yes" orders and asks are "no" orders
+        return cls(
+            yes=parse_side(data.get("bids", [])),
+            no=parse_side(data.get("asks", [])),
         )
     
 
@@ -132,6 +159,8 @@ class PredictionMarketContract(BaseModel):
     order_book: Optional[OrderBookData]
     platform: Platform
 
+    misc_data: Optional[Dict] = None
+
     @classmethod
     def from_kalshi_market_json(cls, market: dict, event: Optional[PredictionMarketEvent] = None):
         strike_value = None
@@ -161,8 +190,8 @@ class PredictionMarketContract(BaseModel):
             volume=market.get("volume"),
 
             strike_type=market.get("strike_type"),
-            strike_upper=market.get("floor_strike") if market.get("strike_type")=="greater" else np.inf,
-            strike_lower=market.get("cap_strike") if market.get("strike_type")=="less" else -np.inf,
+            strike_upper=market.get("cap_strike") if market.get("strike_type")=="less" else np.inf,
+            strike_lower=market.get("floor_strike") if market.get("strike_type")=="greater" else -np.inf,
 
             rules_primary=market.get("rules_primary"),
             rules_secondary=market.get("rules_secondary"),
@@ -208,6 +237,10 @@ class PredictionMarketContract(BaseModel):
                 order_book=None,
                 response_price_units="usd_cent",
                 platform=Platform.POLYMARKET,
+                
+                misc_data= {
+                    "clobTokenIds": market.get("clobTokenIds", "")
+                }
             )
         except Exception as e:
             raise ValueError(f"Failed to parse polymarket contract: {e}")

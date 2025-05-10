@@ -16,27 +16,46 @@ shared_data = {
     'polymarket': []
 }
 
+# Thread-safe data store
+shared_data_lock = threading.Lock()
+shared_data = {
+    'kalshi': [],
+    'polymarket': []
+}
+
 def update_data_loop():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     while True:
         try:
+            # Load config
             with open("config.json", "r") as f:
                 config = json.load(f)
 
-            event_tickers = config.get("kalshi_event_tickers", [])
-            kalshi_data = loop.run_until_complete(load_kalshi_bundles(event_tickers))
-            shared_data['kalshi'] = [b for b in kalshi_data if b is not None]
+            # Fetch Kalshi data
+            kalshi_tickers = config.get("kalshi_event_tickers", [])
+            if not kalshi_tickers:
+                print("No Kalshi tickers specified in config.json")
+                time.sleep(5)
+                continue
+            kalshi_data = loop.run_until_complete(load_kalshi_bundles(kalshi_tickers))
+            kalshi_filtered = [b for b in kalshi_data if b is not None]
 
+            # Fetch Polymarket data
             polymarket_slugs = config.get("polymarket_event_slugs", [])
             if not polymarket_slugs:
-                print("No event slugs specified in config.json")
+                print("No Polymarket event slugs specified in config.json")
                 time.sleep(5)
                 continue
 
             polymarket_data = loop.run_until_complete(load_polymarket_bundles(params={"slug": polymarket_slugs}))
-            shared_data['polymarket'] = [b for b in polymarket_data if b is not None]
+            polymarket_filtered = [b for b in polymarket_data if b is not None]
+
+            # Update shared data in a thread-safe way
+            with shared_data_lock:
+                shared_data['kalshi'] = kalshi_filtered
+                shared_data['polymarket'] = polymarket_filtered
 
         except Exception as e:
             print(f"Error updating data: {e}")
@@ -96,20 +115,22 @@ def render_event_page(ticker):
                 markets = []
                 for contract in bundle.contracts:
                     markets.append(
-                        dbc.Card([
-                            dbc.CardBody([
-                                html.H5(contract.title),
-                                html.P(f"Ticker: {contract.ticker}"),
-                                dcc.Link("View Market", href=f"/market/{contract.ticker}")
-                            ])
-                        ], className="m-2")
+                        dbc.Col(
+                            dbc.Card([
+                                dbc.CardBody([
+                                    html.H5(contract.title),
+                                    html.P(f"Ticker: {contract.ticker}"),
+                                    dcc.Link("View Market", href=f"/market/{contract.ticker}")
+                                ])
+                            ], className="h-100")
+                        , xs=12, sm=6, md=4, lg=3)
                     )
                 return dbc.Container([
                     html.H2(f"Event: {bundle.event.title}"),
                     html.P(f"Subtitle: {bundle.event.sub_title}"),
                     html.P(f"Strike Date: {bundle.event.strike_date}"),
                     dbc.Button("Back to All Events", href="/", color="secondary", className="mb-3"),
-                    dbc.Row(markets)
+                    dbc.Row(markets, className="g-4")
                 ], fluid=True)
     return html.H3("Event Not Found")
 
@@ -127,6 +148,8 @@ def render_market_page(ticker):
                         html.P(f"Close Time: {contract.close_time}"),
                         html.P(f"Yes Bid/Ask: {contract.yes_bid} / {contract.yes_ask}"),
                         html.P(f"No Bid/Ask: {contract.no_bid} / {contract.no_ask}"),
+                        html.P(f"Upper strike: {contract.strike_upper}"),
+                        html.P(f"Lower strike: {contract.strike_lower}"),
                         html.P(f"Last Price: {contract.last_price}"),
                         html.P(f"Volume: {contract.volume}"),
                         html.P(f"Rules: {contract.rules_primary}"),
